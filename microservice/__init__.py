@@ -7,6 +7,9 @@ import json
 import jwt
 from datetime import datetime, timedelta
 import azure.functions as func
+from azure.servicebus import ServiceBusClient, ServiceBusMessage
+import json
+
 load_dotenv()
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -27,6 +30,8 @@ key = os.environ["supabase_key"]
 supabase = create_client(url, key)
 
 SECRET_KEY = os.environ.get('token_key')
+
+service_bus_client = ServiceBusClient.from_connection_string(conn_str=os.environ['SERVICE_BUS_CONNECTION_STRING'])
 
 def generate_token(username):
     payload = {
@@ -54,6 +59,18 @@ def register(req: func.HttpRequest) -> func.HttpResponse:
     else:
         hashed_password = bcrypt.hash(password)
         new_user, count = supabase.table("users").insert([{"username": username, "password": hashed_password}]).execute()
+        with service_bus_client:
+                sender = service_bus_client.get_queue_sender(queue_name='userprofile-queue')
+                with sender:
+                    message_content = {
+                        "eventType": "UserRegistered",
+                        "username": username,
+                        "timestamp": "2024-03-01T12:00:00Z"
+                        }
+                    
+                    messagebody = json.dumps(message_content)
+                    message = ServiceBusMessage(messagebody)
+                    sender.send_messages(message)
         return func.HttpResponse("Account created successfully!", status_code=200)
 
 
@@ -85,6 +102,9 @@ def login(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse("Incorrect password", status_code=400)
     else:
         return func.HttpResponse("Oops, something went wrong!", status_code=400)
+
+
+
 
 
 def logout(req: func.HttpRequest) -> func.HttpResponse:
